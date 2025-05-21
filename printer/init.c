@@ -35,16 +35,6 @@
 
 #endif /* __WATCOMC__ */
 
-// FIXME - use SIMPLE with year + century, not APETIME
-struct _tm {
-  char tm_mday;
-  char tm_month;
-  char tm_year;
-  char tm_hour;
-  char tm_min;
-  char tm_sec;
-};
-
 cmdFrame_t cmd;
 union REGS regs;
 extern void *config_env, *driver_end;
@@ -53,7 +43,6 @@ extern void setf5(void);
 
 #pragma data_seg("_CODE")
 
-uint8_t get_set_time(uint8_t set_flag);
 void check_uart();
 uint16_t parse_config(const uint8_t far *config_sys);
 
@@ -65,7 +54,7 @@ uint16_t Init_cmd(SYSREQ far *req)
 
   regs.h.ah = 0x30;
   intdos(&regs, &regs);
-  consolef("\nFujiNet driver " VERSION
+  consolef("\nFujiNet Printer driver " VERSION
 	   " " CC_VERSION_NAME " %i.%i"
 	   " on MS-DOS %i.%i\n",
 	   CC_VERSION_MAJOR, CC_VERSION_MINOR,
@@ -78,92 +67,9 @@ uint16_t Init_cmd(SYSREQ far *req)
   fujicom_init();
   check_uart();
 
-  err = get_set_time(!getenv("NOTIME"));
+  consolef("Installed\n");
 
-  // If get_set_time returned error, FujiNet is probably not connected
-  if (err) {
-    fujicom_done();
-    return ERROR_BIT;
-  }
-
-  /* Construct BPB table and pointers */
-  {
-    int idx;
-
-
-    req->init.num_units = FN_MAX_DEV;
-
-    for (idx = 0; idx < req->init.num_units; idx++) {
-      /* 5.25" 360k BPB */
-      fn_bpb_table[idx].bps = 512;
-      fn_bpb_table[idx].spau = 2;
-      fn_bpb_table[idx].rs = 1;
-      fn_bpb_table[idx].num_FATs = 2;
-      fn_bpb_table[idx].root_entries = 0x0070;
-      fn_bpb_table[idx].num_sectors = 0x02d0;
-      fn_bpb_table[idx].media_descriptor = 0xfd;
-      fn_bpb_table[idx].spfat = 2;
-      fn_bpb_table[idx].spt = 9;
-      fn_bpb_table[idx].heads = 2;
-      fn_bpb_table[idx].hidden = 0;
-      fn_bpb_table[idx].num_sectors_32 = 0;
-
-      fn_bpb_pointers[idx] = &fn_bpb_table[idx];
-    }
-
-    fn_bpb_pointers[idx] = NULL;
-    req->bpb.table = MK_FP(getCS(), fn_bpb_pointers);
-  }
-
-  setf5();
-  consolef("INT F5 Functions installed.\n");
-  
   return OP_COMPLETE;
-}
-
-/* Returns non-zero on error */
-uint8_t get_set_time(uint8_t set_flag)
-{
-  char reply = 0;
-  struct _tm cur_time;
-  uint16_t year_wcen;
-
-
-  cmd.device = DEVICEID_APETIME;
-  cmd.comnd = CMD_APETIME_GETTZTIME;
-
-  reply = fujicom_command_read(&cmd, (uint8_t *) &cur_time, sizeof(cur_time));
-
-  if (reply != 'C') {
-    consolef("Could not read time from FujiNet %i.\nAborted.\n", reply);
-    return 1;
-  }
-
-  year_wcen = cur_time.tm_year + 2000;
-  consolef("Current FujiNet date & time: %02i/%02i/%04i %02i:%02i:%02i\n",
-	   cur_time.tm_month, cur_time.tm_mday, year_wcen,
-	   cur_time.tm_hour, cur_time.tm_min, cur_time.tm_sec);
-
-  if (set_flag) {
-    regs.h.ah = 0x2B;
-    regs.x.cx = year_wcen;
-    regs.h.dh = cur_time.tm_month;
-    regs.h.dl = cur_time.tm_mday;
-
-    intdos(&regs, &regs);
-
-    regs.h.ah = 0x2D;
-    regs.h.ch = cur_time.tm_hour;
-    regs.h.cl = cur_time.tm_min;
-    regs.h.dh = cur_time.tm_sec;
-    regs.h.dl = 0;
-
-    intdos(&regs, &regs);
-
-    consolef("MS-DOS Time now set from FujiNet\n");
-  }
-
-  return 0;
 }
 
 void check_uart()
